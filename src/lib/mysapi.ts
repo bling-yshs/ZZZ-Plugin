@@ -1,3 +1,4 @@
+import { handlesOperation, legacyGetData } from '../../../mhy-plugin/api.js'
 import type Handler from '../../../../lib/plugins/handler.js'
 import type { Cookie } from './common.js'
 import type { EventType, Mys } from '#interface'
@@ -359,7 +360,8 @@ export default class MysZZZApi extends MysApi {
    * 获取米游社数据
    * @param type 请求类型
    * @param data
-   * @param cached
+   * @param cached 是否缓存
+   * @returns 原有接口 data 或 null
    */
   async getFinalData<T extends keyof Mys.KeyValue>(
     type: T,
@@ -379,6 +381,11 @@ export default class MysZZZApi extends MysApi {
     } = {},
     cached = false
   ): Promise<Mys.KeyValue[T] | null> {
+    if (handlesOperation(type)) {
+      const result = await legacyGetData(this, type, data, cached)
+      const response = await this.checkCode(result, type, data)
+      return response && response.retcode === 0 ? response.data : null
+    }
     if (!data?.headers) data.headers = {}
     if (data.deviceFp) {
       data.headers['x-rpc-device_fp'] = data.deviceFp

@@ -1,3 +1,4 @@
+import { execute } from '../../../mhy-plugin/api.js'
 import type { EventType, Mys } from '#interface'
 // @ts-ignore
 import NoteUser from '../../../genshin/model/mys/NoteUser.js'
@@ -70,7 +71,8 @@ export class ZZZPlugin extends plugin {
   }
 
   /**
-   * 获取米游社 API
+   * 获取米游社 API 及统一设备指纹。
+   * @returns API、UID 和设备指纹
    */
   async getAPI() {
     this.e.game = 'zzz'
@@ -95,85 +97,8 @@ export class ZZZPlugin extends plugin {
       this.reply('ltuid为空，请重新绑定CK')
       throw new Error('ltuid为空')
     }
-    // 获取设备指纹
-    let deviceFp = await redis.get(`ZZZ:DEVICE_FP:${ltuid}:FP`)
-    let data: Record<string, any> = {}
-    if (!deviceFp) {
-      const _bindInfo = await redis.get(`ZZZ:DEVICE_FP:${ltuid}:BIND`)
-      if (_bindInfo) {
-        data = {
-          deviceFp,
-        }
-        try {
-          const bindInfo = JSON.parse(_bindInfo)
-          data = {
-            productName: bindInfo?.deviceProduct,
-            deviceType: bindInfo?.deviceName,
-            modelName: bindInfo?.deviceModel,
-            oaid: bindInfo?.oaid,
-            osVersion: bindInfo?.androidVersion,
-            deviceInfo: bindInfo?.deviceFingerprint,
-            board: bindInfo?.deviceBoard,
-          }
-        } catch (error) { }
-      }
-      const sdk = api.getUrl('getFp', data)
-      if (!sdk) {
-        this.reply('获取请求数据失败')
-        throw new Error('获取请求数据失败')
-      }
-      let res: any
-      try {
-        res = await fetch(sdk.url, {
-          headers: sdk.headers,
-          method: 'POST',
-          body: sdk.body,
-        })
-      } catch (error: any) {
-        logger.error(error.toString())
-        if (!/^(1[0-9])[0-9]{8}/i.test(uid)) {
-          deviceFp = '38d805c20d53d'
-        } else {
-          deviceFp = '38d7f4c72b736'
-        }
-        return { api, uid, deviceFp }
-      }
-      const fpRes = await res.json() as any
-      logger.debug(`[米游社][设备指纹]${JSON.stringify(fpRes)}`)
-      deviceFp = fpRes?.data?.device_fp
-      if (!deviceFp) {
-        this.reply('获取设备指纹失败')
-        throw new Error('获取设备指纹失败')
-      }
-      await redis.set(`ZZZ:DEVICE_FP:${ltuid}:FP`, deviceFp, {
-        EX: 86400 * 7,
-      })
-      if (!/^(1[0-9])[0-9]{8}/i.test(uid)) {
-        data['deviceFp'] = deviceFp
-        const deviceLogin = api.getUrl('deviceLogin', data)
-        const saveDevice = api.getUrl('saveDevice', data)
-        if (!!deviceLogin && !!saveDevice) {
-          logger.debug(`[米游社][设备登录]保存设备信息`)
-          try {
-            logger.debug(`[米游社][设备登录]${JSON.stringify(deviceLogin)}`)
-            const login = await request(deviceLogin.url, {
-              headers: deviceLogin.headers,
-              method: 'POST',
-              body: deviceLogin.body,
-            })
-            const save = await request(saveDevice.url, {
-              headers: saveDevice.headers,
-              method: 'POST',
-              body: saveDevice.body,
-            })
-            const result = await Promise.all([login.json(), save.json()])
-            logger.debug(`[米游社][设备登录]${JSON.stringify(result)}`)
-          } catch (error: any) {
-            logger.error(`[米游社][设备登录]${error.message}`)
-          }
-        }
-      }
-    }
+    const fp = await execute('getFp', { game: 'zzz', uid, cookie: api.cookie, server: api.server, profile: 'zzz' })
+    const deviceFp = fp.data.device_fp
     // 返回数据（API、UID、设备指纹）
     return { api, uid, deviceFp }
   }
