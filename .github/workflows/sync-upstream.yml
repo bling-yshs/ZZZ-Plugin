@@ -1,0 +1,57 @@
+name: Sync upstream dev
+
+on:
+  schedule:
+    - cron: '16 22 * * *'
+      timezone: 'Asia/Shanghai'
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream-dev
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: dev
+
+      - name: Configure Git user
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Merge upstream dev and rebuild main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          if git remote get-url upstream >/dev/null 2>&1; then
+            git remote set-url upstream https://github.com/ZZZure/ZZZ-Plugin.git
+          else
+            git remote add upstream https://github.com/ZZZure/ZZZ-Plugin.git
+          fi
+
+          git fetch --prune upstream +refs/heads/dev:refs/remotes/upstream/dev
+          git pull --ff-only origin dev
+
+          before_sync="$(git rev-parse HEAD)"
+          git merge --no-edit upstream/dev
+          after_sync="$(git rev-parse HEAD)"
+
+          if [ "$before_sync" = "$after_sync" ]; then
+            echo "Fork dev is already up to date."
+            exit 0
+          fi
+
+          git push origin dev
+          gh workflow run build-and-sync.yml --ref dev
