@@ -1,3 +1,4 @@
+import { handlesOperation, legacyGetData } from '../../../mhy-plugin/api.js';
 import MysApi from '../../../genshin/model/mys/mysApi.js';
 import { randomString } from '../utils/data.js';
 import ZZZApiTool from './mysapi/tool.js';
@@ -258,6 +259,11 @@ export default class MysZZZApi extends MysApi {
         throw new MysError(code, this.uid, res);
     }
     async getFinalData(type, data = {}, cached = false) {
+        if (handlesOperation(type)) {
+            const result = await legacyGetData(this, type, data, cached);
+            const response = await this.checkCode(result, type, data);
+            return response && response.retcode === 0 ? response.data : null;
+        }
         if (!data?.headers)
             data.headers = {};
         if (data.deviceFp) {
