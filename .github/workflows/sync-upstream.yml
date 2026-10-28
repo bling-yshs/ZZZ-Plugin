@@ -1,4 +1,4 @@
-name: Sync upstream dev
+name: 🔄 同步上游 (Sync Upstream)
 
 on:
   schedule:
@@ -16,22 +16,22 @@ permissions:
 
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    name: 🔄 同步上游 dev (Sync Upstream Dev)
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout dev
-        uses: actions/checkout@v4
+      - name: 检出 dev 分支 (Checkout Dev)
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: dev
 
-      - name: Configure Git user
+      - name: 配置 Git 用户信息 (Configure Git User)
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
 
-      - name: Merge upstream dev and rebuild main
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: 合并上游 dev 并推送 (Merge and Push Upstream Dev)
+        id: merge
         run: |
           set -euo pipefail
 
@@ -45,13 +45,52 @@ jobs:
           git pull --ff-only origin dev
 
           before_sync="$(git rev-parse HEAD)"
-          git merge --no-edit upstream/dev
-          after_sync="$(git rev-parse HEAD)"
 
+          # 上游仅修改 package.json 且该文件冲突时，跳过本次同步
+          if ! git merge --no-edit upstream/dev; then
+            upstream_changes=$(git diff --name-only "$(git merge-base HEAD upstream/dev)" upstream/dev)
+            conflicts=$(git diff --name-only --diff-filter=U)
+            if [ "$upstream_changes" = "package.json" ] && [ "$conflicts" = "package.json" ]; then
+              git merge --abort
+              echo "::notice::上游仅修改 package.json 且合并冲突，已跳过本次同步。"
+              exit 0
+            fi
+            exit 1
+          fi
+
+          after_sync="$(git rev-parse HEAD)"
           if [ "$before_sync" = "$after_sync" ]; then
-            echo "Fork dev is already up to date."
+            echo "dev 已与上游同步。"
             exit 0
           fi
 
           git push origin dev
-          gh workflow run build-and-sync.yml --ref dev
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: 发送同步失败邮件 (Send Sync Failure Email)
+        if: failure()
+        uses: dawidd6/action-send-mail@v23
+        with:
+          server_address: smtp.qq.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: '【失败提醒】ZZZ-Plugin 上游同步失败'
+          to: 377178599@qq.com
+          from: GitHub Actions 通知 <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            你好，
+
+            你的仓库（${{ github.repository }}）在将上游 dev 合并并推送到 Fork dev 时失败了。
+
+            请检查合并冲突、Git 权限或网络错误，处理后重新运行工作流。
+
+            失败日志：
+            https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: 触发构建工作流 (Dispatch Build Workflow)
+        if: steps.merge.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run build-and-sync.yml --ref dev
